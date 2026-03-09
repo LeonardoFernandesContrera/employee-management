@@ -1,0 +1,36 @@
+services:
+
+  db:
+    image: postgres:15
+    container_name: employees_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: employees
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build: ./backend
+    container_name: employees_api
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/employees
+    command: sh -c "npx prisma migrate deploy && npx prisma db seed && ts-node src/app.ts"
+    
+  frontend:
+    build: ./frontend
+    container_name: employees_frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
