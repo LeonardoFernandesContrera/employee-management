@@ -35,7 +35,7 @@ Phase 1 must not add or redesign:
 - Authentication, authorization, registration, recovery, sessions, RBAC, or multiple users.
 - The authenticated manual demo-reset operation.
 - Summary cards, responsive employee cards, table redesign, modal redesign, or accessibility redesign.
-- XLSX preview, confirmation, downloadable templates, rejection-report downloads, redesigned XLSX UI, or filter-aware export.
+- XLSX preview, confirmation, downloadable templates, rejection-report downloads, redesigned XLSX UI, or filter-aware export. Phase 4 may add search, status-filter, and sort inputs to export while continuing to ignore pagination; Phase 1 accepts no export query parameters.
 - Audit history, charts, departments, managers, benefits, advanced HR fields, or enterprise HR workflows.
 - Deployment configuration, hosting automation, CI workflows, production restart policies, or environment-specific infrastructure.
 - README, portfolio narrative, screenshots, case studies, or other portfolio documentation.
@@ -79,26 +79,54 @@ Express route
 
 Errors flow to one final global error middleware and are serialized through the stable error contract.
 
-### 5.2 Express application and server
+### 5.2 Configuration bootstrap, Express application, and server
 
-`backend/src/app.ts` must only:
+A configuration module exports a pure environment parser and the application configuration type:
 
-- Construct the Express application.
-- Configure CORS and JSON parsing.
+```ts
+type NodeEnvironment = "development" | "test" | "production";
+
+interface AppConfig {
+  readonly databaseUrl: string;
+  readonly port: number;
+  readonly corsOrigin: string;
+  readonly nodeEnv: NodeEnvironment;
+}
+
+function parseEnvironment(source: NodeJS.ProcessEnv): AppConfig;
+```
+
+`parseEnvironment` has no side effects. It validates only the supplied object, returns a normalized immutable configuration, and never opens a connection or listener.
+
+`backend/src/app.ts` exports this factory:
+
+```ts
+function createApp(
+  config: AppConfig,
+  dependencies?: AppDependencies
+): Express;
+```
+
+`createApp` must only:
+
+- Construct and return the Express application.
+- Configure CORS from `config.corsOrigin` and configure JSON parsing.
+- Use supplied dependencies in tests or create production dependencies from the validated `AppConfig` when they are omitted.
 - Register liveness/readiness and employee routes.
 - Register the unknown-route handler.
 - Register the global error middleware last.
-- Export the application for API tests and runtime startup.
 
-It must not call `listen` or perform startup-side database mutations.
+Importing `app.ts` must not read `process.env`, open a database connection, start a listener, or perform startup-side database mutations.
 
-`backend/src/server.ts` must:
+`backend/src/server.ts` is the executable bootstrap and must:
 
-- Load and validate runtime environment values.
-- Import the already constructed Express application.
-- Start exactly one HTTP listener.
+- Call `parseEnvironment(process.env)` exactly once.
+- Pass the resulting `AppConfig` to `createApp`.
+- Start exactly one HTTP listener on `config.port`.
 - Log a concise startup event without secrets.
-- Set a non-zero exit code or terminate startup on a fatal listen/bootstrap error.
+- Set a non-zero exit code or terminate startup on a fatal configuration, dependency, or listen error.
+
+API tests call `createApp(testConfig, testDependencies)` directly. They do not mutate process-wide environment values merely to import the application.
 
 ### 5.3 Runtime validation and DTOs
 
@@ -133,32 +161,61 @@ The Employee service owns use-case behavior:
 
 - Create an employee.
 - Retrieve an employee or raise `EMPLOYEE_NOT_FOUND`.
-- List employees using a parsed query object.
+- List employees using a canonical Prisma-independent `EmployeeListOptions` object.
 - Partially update an employee.
 - Delete an employee.
 - Import XLSX rows by passing each normalized row through the same create use case.
 - Export every employee using a non-paginated repository query.
 
-The service converts validated salary strings to `Prisma.Decimal` and date-only strings to the database representation. It never accepts an Express `Request` or `Response` object.
+The controller passes the validated list query to the service as:
+
+```ts
+type EmployeeSortField =
+  | "fullName"
+  | "email"
+  | "jobTitle"
+  | "status"
+  | "salary"
+  | "hireDate";
+
+interface EmployeeListOptions {
+  page: number;
+  pageSize: number;
+  search?: string;
+  status?: EmployeeStatus;
+  sortBy: EmployeeSortField;
+  sortOrder: "asc" | "desc";
+}
+```
+
+The service may calculate pagination metadata and enforce use-case rules, but it does not construct Prisma `where`, `orderBy`, `skip`, or `take` objects. It never accepts an Express `Request`/`Response` or imports Prisma query-input types.
 
 Email uniqueness is ultimately enforced by PostgreSQL. The service/error translation maps the Prisma unique-constraint race to `EMAIL_CONFLICT`; it must not rely only on a pre-insert lookup.
 
 ### 5.6 Employee repository
 
-The repository is the only Employee layer that imports Prisma query types or executes Prisma operations. It exposes narrow methods required by the service, including:
+The repository is the only Employee layer that imports Prisma query-input types or executes Prisma operations. It exposes narrow methods required by the service, including:
 
 - `create`.
 - `findById`.
-- `findPage` with an already constructed whitelist-safe `where` and `orderBy`.
-- `findAllForExport` without pagination.
+- `findPage(options: EmployeeListOptions)`.
+- `findAllForExport()` without arguments or pagination.
 - `update`.
 - `delete`.
 
-It returns persistence entities and counts. It does not parse HTTP strings, select client-controlled column names, throw HTTP-specific errors, serialize Decimal/date values, or parse workbooks.
+The repository maps `EmployeeListOptions` to Prisma internally:
+
+- `search` becomes the explicit case-insensitive `OR` over physical mappings for `fullName`, `email`, and `jobTitle`.
+- `status` becomes the explicit enum equality filter.
+- `sortBy` is mapped with an exhaustive switch/table to one approved Prisma field; it is never used as a computed raw property supplied by the client.
+- `page` and `pageSize` become `skip` and `take`.
+- Every `orderBy` ends with `id ASC` as the stable tiebreaker.
+
+The repository also owns persistence conversion. It converts canonical salary strings to `Prisma.Decimal`, canonical hire-date strings to the UTC-safe value required by Prisma/PostgreSQL `date`, and Prisma records back to Prisma-independent domain records with fixed salary/date strings. Controller and service layers therefore do not import Prisma types. The repository does not parse HTTP strings, throw HTTP-specific errors, or parse workbooks.
 
 ### 5.7 Serialization
 
-One response mapper converts Prisma employees to the public `Employee` representation. All single-record, list, create, and update responses use it. XLSX export uses the same canonical value rules but emits only the ten import-compatible business columns.
+One response mapper converts Prisma-independent domain Employee records to the public `Employee` representation. The repository has already converted Prisma values before this mapper runs. All single-record, list, create, and update responses use it. XLSX export uses the same canonical value rules but emits only the ten import-compatible business columns.
 
 ## 6. Canonical Employee Data Contract
 
@@ -335,7 +392,7 @@ GET /employees
 | `sortBy` | `fullName` | `fullName`, `email`, `jobTitle`, `status`, `salary`, or `hireDate` | Whitelisted primary sort field |
 | `sortOrder` | `asc` | `asc` or `desc` | Primary sort direction |
 
-The repository never receives a raw sort key. Validation maps `sortBy` to an explicit Prisma `orderBy` object.
+Validation converts the HTTP query into `EmployeeListOptions` and rejects every value outside the canonical sort whitelist. The service and controller pass that Prisma-independent object without constructing Prisma inputs. The repository alone maps its canonical `sortBy` value to an explicit Prisma `orderBy` object.
 
 Every query adds `id ASC` as a deterministic final tiebreaker. Default ordering is therefore `fullName ASC, id ASC`. A descending primary sort still uses `id ASC` as the final tiebreaker.
 
@@ -430,7 +487,7 @@ All failures use this envelope:
 | 409 | `EMAIL_CONFLICT` | Normalized email is already used |
 | 413 | `PAYLOAD_TOO_LARGE` | XLSX upload exceeds 5 MiB |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | Upload is not an XLSX MIME/extension combination |
-| 422 | `VALIDATION_ERROR` | Path, JSON body, or list-query value is invalid |
+| 422 | `VALIDATION_ERROR` | Path, JSON body, list/export query, or required XLSX file input is invalid |
 | 422 | `INVALID_XLSX` | Workbook, worksheet, or header structure is invalid |
 | 500 | `INTERNAL_ERROR` | Unexpected server failure |
 
@@ -637,7 +694,9 @@ File-level rules:
 - Required extension: `.xlsx`, compared case-insensitively.
 - Required MIME type: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
 - Only the first worksheet is processed.
-- A missing file, corrupt workbook, missing first worksheet, missing required header, duplicate header, or unknown header fails the whole request.
+- A missing `file` form part fails before workbook parsing with HTTP 422 `VALIDATION_ERROR`. Its structured `details` contains an issue whose `path` is `file`; it is not an `INVALID_XLSX` error.
+- A corrupt workbook, missing first worksheet, missing required header, duplicate header, or unknown header is a structural failure and returns HTTP 422 `INVALID_XLSX`.
+- A workbook whose first worksheet contains the exact valid header row and zero data rows is structurally valid. It returns HTTP 200 with `total: 0`, `inserted: 0`, and `rejected: 0`. A worksheet with no header row is not an empty valid workbook; it returns `INVALID_XLSX`.
 
 | XLSX header | Required | Accepted cell input | Canonical value |
 |---|---:|---|---|
@@ -679,7 +738,7 @@ Success response:
 }
 ```
 
-A structurally valid workbook returns HTTP 200 even when every data row is rejected; row validation failures appear only in the summary counts during this temporary workflow. File-level failures use 413, 415, or 422 according to Section 8.
+A structurally valid workbook returns HTTP 200 even when it has zero data rows or every data row is rejected; row validation failures appear only in the summary counts during this temporary workflow. File-level failures use 413, 415, or 422 according to Section 8.
 
 ### 11.3 Export endpoint
 
@@ -687,16 +746,18 @@ A structurally valid workbook returns HTTP 200 even when every data row is rejec
 GET /employees/export
 ```
 
-Export behavior:
+Export uses a strict empty query schema. Any supplied query key or value, including `page`, `pageSize`, `search`, `status`, `sortBy`, or `sortOrder`, returns HTTP 422 `VALIDATION_ERROR`; Phase 1 never silently ignores an export query.
 
-- Exports all employees.
-- Ignores CRUD pagination parameters and never truncates to a page.
-- Does not apply list search, status filter, or caller-selected sorting in Phase 1.
-- Ignores any supplied query parameters; none affect the temporary export dataset or order.
+A queryless request:
+
+- Exports all employees through `findAllForExport()` and is never paginated or truncated to a page.
+- Applies no list search, status filter, or caller-selected sorting in Phase 1.
 - Orders rows by `fullName ASC, id ASC` for deterministic output.
 - Uses worksheet name `Employees`.
 - Downloads as `employees.xlsx` with the XLSX MIME type.
 - Excludes `id`, `createdAt`, and `updatedAt`.
+
+Phase 4 owns the future change that may accept current search, status-filter, and sort inputs while continuing to ignore pagination. That future contract is not partially implemented in Phase 1.
 
 Columns are emitted in this exact order:
 
@@ -729,7 +790,9 @@ The frontend must mechanically adopt:
 
 Existing components may add the now-required email input and replace legacy field bindings so basic CRUD remains usable. Layout, visual styling, modal behavior, responsiveness, accessibility redesign, summary cards, and XLSX workflow UX remain Phase 3 or Phase 4 work.
 
-Frontend display formatting may render USD and unambiguous dates, but the stored/API values remain the canonical strings defined here.
+The Phase 1 interface is English-only. Employee salary is displayed in US dollars with `Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 })`. Hire date is displayed as the canonical `YYYY-MM-DD` string and must not be passed through locale-sensitive or timezone-shifting date rendering such as `new Date(value).toLocaleDateString()`.
+
+Frontend state, request bodies, and response handling send and receive the canonical unformatted salary and hire-date strings unchanged. Formatting is presentation-only and never changes the API contract.
 
 ## 13. Docker, Startup, Health, and Compose Isolation
 
@@ -777,6 +840,15 @@ node_modules/.bin/serve -s dist -l 5173
 
 It must not install a global `serve` package during image construction.
 
+The builder stage declares an explicit Docker build argument named `VITE_API_BASE_URL`, verifies that it is non-empty, exposes it only to the Vite build step, and then runs `npm run build`. The implementation follows this contract or an equivalent form that fails on an empty value:
+
+```dockerfile
+ARG VITE_API_BASE_URL
+RUN test -n "$VITE_API_BASE_URL" && VITE_API_BASE_URL="$VITE_API_BASE_URL" npm run build
+```
+
+Vite embeds that project-specific API base URL into the compiled static assets. The runtime image neither reads nor promises runtime substitution for `VITE_API_BASE_URL`.
+
 No source or `/app/dist` bind mount may replace image output in the production-style Compose configuration.
 
 ### 13.4 Environment contract
@@ -790,7 +862,9 @@ Backend startup validates:
 | `CORS_ORIGIN` | Required HTTP(S) origin; no wildcard for the public demo |
 | `NODE_ENV` | `development`, `test`, or `production` |
 
-Frontend build uses the exact variable `VITE_API_BASE_URL`. Example environment files contain non-secret example values. Session secrets belong to Phase 2 and are not introduced now.
+`server.ts` supplies `process.env` to the pure parser once, receives the normalized `AppConfig`, and passes it to `createApp`. CORS is configured exclusively from `config.corsOrigin`; `app.ts` does not independently inspect environment variables.
+
+Frontend build uses the exact variable `VITE_API_BASE_URL`. It is a required build-time public URL, not a runtime container configuration variable. Local Vite builds and Docker builds both fail clearly when it is absent or empty. No hard-coded development API URL or runtime configuration loader is introduced. Example environment files contain non-secret example values. Session secrets belong to Phase 2 and are not introduced now.
 
 ### 13.5 Health endpoints
 
@@ -821,7 +895,19 @@ Compose must contain:
 
 The database does not publish a host port because the API reaches it over the Compose network. API uses `${API_PORT:-3000}:3000`, and frontend uses `${FRONTEND_PORT:-5173}:5173`, so two projects can supply different host-port sets.
 
-Isolation verification creates two uniquely named temporary projects with distinct host ports, inspects actual container/network/image/volume names and `com.docker.compose.project` labels, and asserts disjoint resource sets. Cleanup targets only those exact temporary project names and does not remove pre-existing resources.
+Compose passes the public API URL explicitly as a frontend build argument:
+
+```yaml
+frontend:
+  build:
+    context: ./frontend
+    args:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:?set a public API base URL}
+```
+
+The API service receives `CORS_ORIGIN` as the corresponding public frontend origin, for example `${CORS_ORIGIN:?set the public frontend origin}`. `VITE_API_BASE_URL` identifies the browser-reachable API URL, while `CORS_ORIGIN` identifies the browser-visible frontend origin; neither uses a Compose service hostname intended only for container-to-container traffic.
+
+Isolation verification creates two uniquely named temporary projects with distinct host ports, distinct `VITE_API_BASE_URL` build arguments, and matching distinct `CORS_ORIGIN` values. Each project builds its own project-scoped frontend image, and inspection verifies that each compiled frontend calls its own browser-reachable API URL and that each API permits only its own frontend origin. The verification also inspects actual container/network/image/volume names and `com.docker.compose.project` labels and asserts disjoint resource sets. Cleanup targets only those exact temporary project names and does not remove pre-existing resources.
 
 The already unstaged deletion of `restart: always` is intentionally adopted in the later Docker implementation commit. Deployment-specific restart policy remains deferred.
 
@@ -861,9 +947,13 @@ Security review distinguishes production dependencies from development-only tool
 
 **Validation unit tests** cover every field boundary, exact length limit, normalization rule, enum, salary representation, date round trip, unknown field, and list-query whitelist.
 
-**Service unit tests** inject a narrow repository fake/mock and cover not-found behavior, query construction, uniqueness translation, partial update, delete, export-all behavior, and XLSX row delegation to the canonical create use case.
+**Service unit tests** inject a narrow repository fake/mock and cover not-found behavior, forwarding canonical `EmployeeListOptions`, pagination metadata, uniqueness translation, partial update, delete, argument-free export-all behavior, and XLSX row delegation to the canonical create use case. Service assertions use no Prisma query-input shapes.
 
-**API integration tests** import `app.ts` without opening a port and exercise routes through Supertest. They use a dedicated test-only PostgreSQL database with migrations applied. Tests cover success envelopes, status codes, pagination metadata, stable ordering, filtering/search, conflicts, sanitization, and health.
+**Repository unit/integration tests** cover the internal mapping from every allowed `EmployeeListOptions` combination to Prisma `where`, whitelisted `orderBy`, `skip`, and `take`, including the stable `id ASC` tiebreaker. They also cover canonical salary-string to `Prisma.Decimal` conversion, canonical hire-date conversion without timezone drift, and conversion of persisted records back to Prisma-independent domain values.
+
+**Configuration unit tests** pass explicit environment-like objects to the pure parser and cover missing, invalid, and normalized values without mutating `process.env`. Importing the configuration module has no side effects.
+
+**API integration tests** import `app.ts` without reading environment state or opening a port and exercise `createApp(testConfig, testDependencies)` through Supertest. They use a dedicated test-only PostgreSQL database with migrations applied. Tests cover success envelopes, status codes, pagination metadata, stable ordering, filtering/search, conflicts, sanitization, health, strict export-query rejection, and the absence of import/listener side effects.
 
 **Migration integration tests** cover:
 
@@ -884,9 +974,11 @@ Security review distinguishes production dependencies from development-only tool
 
 **Seed integration tests** run the compiled seed twice and prove that the second run inserts nothing and does not overwrite edited canonical records.
 
-**XLSX integration tests** cover valid import, partial success, same-file duplicate email, existing email conflict, invalid header sets, corrupt workbook, oversize upload, invalid salary/date/status/email/lengths, successful export, all-row export independent of pagination, exact column order, and export/import round trip.
+**XLSX integration tests** cover valid import, a valid header-only workbook with zero data rows, missing `file` as `VALIDATION_ERROR` with an issue in `details` whose `path` is `file`, partial success, same-file duplicate email, existing email conflict, invalid header sets, corrupt workbook, oversize upload, invalid salary/date/status/email/lengths, successful queryless export, rejection of every supplied export query key, all-row non-paginated export, exact column order, and export/import round trip.
 
-**Docker checks** cover clean image builds, exact compiled artifact paths, direct image startup, startup failure propagation, health gating, no source runtime, and two-project resource isolation.
+**Frontend smoke checks** verify English labels, exact `en-US` USD salary formatting, literal `YYYY-MM-DD` hire-date display without timezone conversion, and unchanged canonical salary/date strings at the API boundary.
+
+**Docker checks** cover clean image builds, required non-empty `VITE_API_BASE_URL` build arguments, exact compiled artifact paths, direct image startup, startup failure propagation, health gating, no source runtime, and two-project resource isolation. The two-project check verifies distinct project-scoped images with the correct embedded API URLs and corresponding API CORS origins.
 
 ### 15.2 Database isolation
 
@@ -935,14 +1027,14 @@ This section identifies ownership, not implementation order.
 
 - `backend/prisma/schema.prisma` and one new custom migration.
 - Seed relocation to `backend/src/database/seed.ts`; removal of generated/dead seed duplicates from source locations.
-- `backend/src/app.ts` and `backend/src/server.ts` entrypoint correction.
-- Environment validation, domain errors, global error translation, request validation, and response serialization modules.
+- `backend/src/app.ts` and `backend/src/server.ts` entrypoint correction, with `createApp(config, dependencies?)` and exactly one environment parse/listen path.
+- Pure environment parsing and `AppConfig`, domain errors, global error translation, request validation, and response serialization modules.
 - Employee DTO/schema, controller, service, repository, and route changes.
 - Health routes.
 - Existing XLSX upload/service/controller code mechanically adapted to the canonical use case.
 - Backend TypeScript, Jest, lint, formatting, package manifest, lockfile, and Docker build configuration.
-- Frontend Employee types, API client, composable, existing components, environment-based API URL, quality configuration, package manifest/lockfile, and Docker image.
-- Root/local Compose changes, including removal of fixed container names and explicit adoption of the existing restart-policy deletion.
+- Frontend Employee types, API client, composable, existing components, build-time `VITE_API_BASE_URL`, English USD/date presentation, quality configuration, package manifest/lockfile, and Docker image.
+- Root/local Compose changes, including frontend build arguments, matching API `CORS_ORIGIN`, removal of fixed container names, and explicit adoption of the existing restart-policy deletion.
 - Backend/frontend Docker ignore and environment example files.
 
 No authentication, reset, new page, redesigned component, Phase 4 XLSX workflow, deployment, CI, README, or portfolio file belongs in this surface.
@@ -986,6 +1078,8 @@ No authentication, reset, new page, redesigned component, Phase 4 XLSX workflow,
 - Email normalization and database uniqueness remain race-safe.
 - Pagination metadata and no-result behavior match Section 7.
 - Search, status filtering, sort whitelist, and `id ASC` tiebreaking are verified.
+- Controller and service layers use only canonical Prisma-independent `EmployeeListOptions`; only the repository constructs Prisma list inputs and performs salary/date persistence conversion.
+- `createApp` receives explicit `AppConfig` and optional dependencies, reads no environment state, and never listens; `server.ts` parses `process.env` once and creates the only listener.
 - Not-found, conflict, malformed JSON, validation, file, unknown-route, and internal errors have distinct sanitized responses.
 
 ### 17.4 XLSX
@@ -994,8 +1088,11 @@ No authentication, reset, new page, redesigned component, Phase 4 XLSX workflow,
 - Canonical headers, required/optional rules, and exact column order match Section 11.
 - Import passes every row through canonical create validation and the create use case.
 - Partial success remains deterministic.
-- Export includes all employees and ignores pagination.
-- Export does not introduce Phase 4 filter-aware behavior.
+- Missing upload file returns 422 `VALIDATION_ERROR` with a `file` detail; malformed workbook structure returns 422 `INVALID_XLSX`.
+- A valid header-only workbook succeeds with zero counts.
+- Queryless export includes all employees through the dedicated non-paginated repository method.
+- Any export query parameter, including pagination, filtering, or sorting parameters, returns 422 `VALIDATION_ERROR`; no Phase 1 export query is silently ignored.
+- Phase 4 filter-aware export remains deferred and, when introduced, will accept search/filter/sort while continuing to ignore pagination.
 - Export/import round trip succeeds in an empty isolated database.
 - No preview, confirmation, template, rejection-report download, or redesigned XLSX workflow appears.
 
@@ -1005,13 +1102,17 @@ No authentication, reset, new page, redesigned component, Phase 4 XLSX workflow,
 - Email is supported where mechanically required.
 - Edit requests use `PATCH`.
 - Pagination metadata and import summary names match the API.
+- Salary displays as USD through the exact `en-US` formatter in Section 12, and hire date displays as literal `YYYY-MM-DD` without timezone or locale conversion.
+- Requests and responses retain unformatted canonical salary and hire-date strings.
 - No visual/product redesign enters the diff.
 
 ### 17.6 Docker and Compose
 
 - The backend production image contains `dist/database/seed.js` and `dist/server.js`.
-- `app.ts` never listens; `server.ts` validates environment and listens once.
+- `app.ts` exposes `createApp(config, dependencies?)`, never reads environment state, and never listens; `server.ts` parses the environment and listens once.
 - Image startup runs migration, compiled seed, then compiled server.
+- The frontend image requires and embeds the project-specific `VITE_API_BASE_URL` build argument; there is no runtime frontend configuration promise or hard-coded API URL.
+- Compose passes matching browser-reachable API and frontend origins through `VITE_API_BASE_URL` and `CORS_ORIGIN` respectively.
 - Production uses no `ts-node`, source command, global TypeScript, or Compose backend command override.
 - No fixed container name, fixed volume physical name, external application volume, or `/app/dist` bind mount remains.
 - Database health gates API startup; readiness checks database access.
@@ -1054,19 +1155,23 @@ No authentication, reset, new page, redesigned component, Phase 4 XLSX workflow,
 | Optional empty values | Convert to `NULL` | Migration and input normalization |
 | Migration atomicity | One explicit PostgreSQL transaction | `BEGIN`, initial table lock, `COMMIT` |
 | Update route | `PATCH /employees/:id` | Route and API tests |
-| List behavior | Whitelisted query and stable `id ASC` tiebreaker | Zod and repository query builder |
+| List behavior | Canonical `EmployeeListOptions`, whitelisted query, and stable `id ASC` tiebreaker | Zod produces Prisma-independent options; repository alone builds Prisma inputs |
 | Errors | Stable sanitized envelope | Domain errors and final middleware |
 | XLSX availability | Existing import/export retained | Mechanically adapted handlers and integration tests |
 | XLSX import | Canonical validation/use case, partial success | Row normalization then normal create path |
-| XLSX export | All employees, no pagination/filter-aware behavior | Dedicated non-paginated repository method |
-| Frontend | Mechanical contract compatibility only | Existing components; no redesign |
+| XLSX import file errors | Missing file is `VALIDATION_ERROR`; workbook structure is `INVALID_XLSX` | Global error envelope and endpoint tests |
+| XLSX export | Strict empty query; queryless request exports all; any query is 422; output is never paginated | Strict empty schema and dedicated non-paginated repository method |
+| Frontend | Mechanical contract compatibility, English UI, `en-US` USD, literal `YYYY-MM-DD` | Existing components and boundary smoke checks; no redesign |
 | Seed artifact | `dist/database/seed.js` | Source placement and image assertion |
 | Server artifact | `dist/server.js` | Source placement and image assertion |
-| Express app | Construct/export only | `app.ts` test and source review |
+| Configuration bootstrap | Pure `parseEnvironment(source)` returns `AppConfig` | Unit tests with explicit objects and no `process.env` mutation |
+| Express app | `createApp(config, dependencies?)`; no environment read or listener | `app.ts` tests and source review |
 | Production execution | Compiled JavaScript only | Multi-stage image and direct startup test |
+| Frontend API URL | Required `VITE_API_BASE_URL` Docker build argument | Vite build embeds each project's browser-reachable API URL; no runtime substitution |
+| API CORS | `CORS_ORIGIN` is each project's public frontend origin | Startup validation and two-project isolation check |
 | Compose names | No fixed `container_name` | Project-scoped generated resources |
 | Compose volume | Project-scoped `postgres_data` | No physical `name` or external volume |
 | Restart policy | Keep `restart: always` removed locally | Explicit later Docker commit |
 | Reproducibility | `npm ci` plus committed lockfiles | Clean-install gates |
 | Dependency changes | Tooling, confirmed removals, justified compatible security upgrades only | Manifest review and clean verification |
-| Deferred work | Authentication, reset, redesign, advanced XLSX, deployment, portfolio | Scope review and diff inspection |
+| Deferred work | Authentication, reset, redesign, filter/sort-aware XLSX export, advanced XLSX UX, deployment, portfolio | Phase 4 may add export search/filter/sort but still ignores pagination; scope review and diff inspection |
