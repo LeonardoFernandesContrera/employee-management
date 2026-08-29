@@ -58,7 +58,7 @@ The implementation starts from these checked-in facts:
 - The current TypeScript layout emits `dist/src/app.js`, while package and image startup expect `dist/app.js`.
 - The existing XLSX service bypasses the canonical create use case and uses legacy headers.
 - Current Compose sets fixed container names and overrides the backend image command with source execution.
-- The user-owned removal of `restart: always` from `docker-compose.yml` is an approved local Compose change and must be retained.
+- The current branch's committed `docker-compose.yml` baseline already omits `restart: always` from the database service. This approved removal must be preserved by all later Phase 1 Docker and Compose work.
 
 ## 5. Architecture and Responsibilities
 
@@ -909,7 +909,7 @@ The API service receives `CORS_ORIGIN` as the corresponding public frontend orig
 
 Isolation verification creates two uniquely named temporary projects with distinct host ports, distinct `VITE_API_BASE_URL` build arguments, and matching distinct `CORS_ORIGIN` values. Each project builds its own project-scoped frontend image, and inspection verifies that each compiled frontend calls its own browser-reachable API URL and that each API permits only its own frontend origin. The verification also inspects actual container/network/image/volume names and `com.docker.compose.project` labels and asserts disjoint resource sets. Cleanup targets only those exact temporary project names and does not remove pre-existing resources.
 
-The already unstaged deletion of `restart: always` is intentionally adopted in the later Docker implementation commit. Deployment-specific restart policy remains deferred.
+The committed Compose baseline already omits `restart: always` from the database service. The later Docker implementation commit preserves that baseline, contains only the remaining approved Docker and Compose changes, and does not duplicate or claim ownership of the existing removal. Deployment-specific restart policy remains deferred.
 
 ### 13.7 Docker ignore rules
 
@@ -1034,7 +1034,7 @@ This section identifies ownership, not implementation order.
 - Existing XLSX upload/service/controller code mechanically adapted to the canonical use case.
 - Backend TypeScript, Jest, lint, formatting, package manifest, lockfile, and Docker build configuration.
 - Frontend Employee types, API client, composable, existing components, build-time `VITE_API_BASE_URL`, English USD/date presentation, quality configuration, package manifest/lockfile, and Docker image.
-- Root/local Compose changes, including frontend build arguments, matching API `CORS_ORIGIN`, removal of fixed container names, and explicit adoption of the existing restart-policy deletion.
+- Remaining root/local Compose changes, including frontend build arguments, matching API `CORS_ORIGIN`, and removal of fixed container names. This work preserves the committed restart-policy baseline and does not duplicate or claim ownership of that existing removal.
 - Backend/frontend Docker ignore and environment example files.
 
 No authentication, reset, new page, redesigned component, Phase 4 XLSX workflow, deployment, CI, README, or portfolio file belongs in this surface.
@@ -1118,7 +1118,7 @@ No authentication, reset, new page, redesigned component, Phase 4 XLSX workflow,
 - Database health gates API startup; readiness checks database access.
 - Two uniquely named projects resolve to disjoint containers, networks, images, and volumes and can use distinct host ports.
 - Validation cleanup removes only resources created under those exact temporary project names.
-- The existing `restart: always` removal is retained and explicitly included in the later Docker commit.
+- The committed removal of `restart: always` remains present, and the later Docker implementation commit contains only the remaining approved Docker and Compose changes without duplicating or claiming ownership of that removal.
 
 ### 17.7 Dependencies and quality
 
@@ -1171,7 +1171,7 @@ No authentication, reset, new page, redesigned component, Phase 4 XLSX workflow,
 | API CORS | `CORS_ORIGIN` is each project's public frontend origin | Startup validation and two-project isolation check |
 | Compose names | No fixed `container_name` | Project-scoped generated resources |
 | Compose volume | Project-scoped `postgres_data` | No physical `name` or external volume |
-| Restart policy | Keep `restart: always` removed locally | Explicit later Docker commit |
+| Restart policy | Current committed baseline omits `restart: always`; preserve it | Later Docker commit contains only remaining approved changes and does not duplicate or claim the existing removal |
 | Reproducibility | `npm ci` plus committed lockfiles | Clean-install gates |
 | Dependency changes | Tooling, confirmed removals, justified compatible security upgrades only | Manifest review and clean verification |
 | Deferred work | Authentication, reset, redesign, filter/sort-aware XLSX export, advanced XLSX UX, deployment, portfolio | Phase 4 may add export search/filter/sort but still ignores pagination; scope review and diff inspection |
