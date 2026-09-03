@@ -2,16 +2,15 @@ import { prisma } from "../utils/prisma";
 import { Prisma } from "@prisma/client";
 
 export class EmployeeRepository {
-
   async create(data: Prisma.EmployeeCreateInput) {
     return prisma.employee.create({
-      data
+      data,
     });
   }
 
   async findById(uuid: string) {
     return prisma.employee.findUnique({
-      where: { uuid }
+      where: { uuid },
     });
   }
 
@@ -21,17 +20,16 @@ export class EmployeeRepository {
     where?: Prisma.EmployeeWhereInput;
     orderBy?: Prisma.EmployeeOrderByWithRelationInput;
   }) {
-
     const [data, total] = await Promise.all([
       prisma.employee.findMany({
         skip: params.skip,
         take: params.take,
         where: params.where,
-        orderBy: params.orderBy
+        orderBy: params.orderBy,
       }),
       prisma.employee.count({
-        where: params.where
-      })
+        where: params.where,
+      }),
     ]);
 
     return { data, total };
@@ -40,13 +38,13 @@ export class EmployeeRepository {
   async update(uuid: string, data: Prisma.EmployeeUpdateInput) {
     return prisma.employee.update({
       where: { uuid },
-      data
+      data,
     });
   }
 
   async delete(uuid: string) {
     return prisma.employee.delete({
-      where: { uuid }
+      where: { uuid },
     });
   }
 }

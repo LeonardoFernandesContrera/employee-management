@@ -17,9 +17,11 @@ const project = (displayName, testMatch, testPathIgnorePatterns = []) => ({
 module.exports = {
   projects: [
     project("unit", ["<rootDir>/src/**/*.unit.test.ts"]),
-    project("integration", ["<rootDir>/src/**/*.integration.test.ts"], [
-      "<rootDir>/src/test/migration/",
-    ]),
+    project(
+      "integration",
+      ["<rootDir>/src/**/*.integration.test.ts"],
+      ["<rootDir>/src/test/migration/"],
+    ),
     project("migration", ["<rootDir>/src/test/migration/**/*.integration.test.ts"]),
   ],
 };

@@ -22,7 +22,10 @@ function enumerateSourceTests(directory) {
     const entryPath = resolve(directory, entry.name);
     if (entry.isDirectory()) {
       tests.push(...enumerateSourceTests(entryPath));
-    } else if (entry.name.endsWith(".unit.test.ts") || entry.name.endsWith(".integration.test.ts")) {
+    } else if (
+      entry.name.endsWith(".unit.test.ts") ||
+      entry.name.endsWith(".integration.test.ts")
+    ) {
       tests.push(normalizePath(entryPath));
     }
   }

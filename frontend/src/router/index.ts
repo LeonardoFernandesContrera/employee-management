@@ -1,13 +1,11 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
-import Employees from '../views/EmployeeView.vue'
+import { createRouter, createWebHashHistory } from "vue-router";
+import Employees from "../views/EmployeeView.vue";
 
-const routes = [
-  { path: '/', component: Employees },
-]
+const routes = [{ path: "/", component: Employees }];
 
 export const router = createRouter({
-  history: createWebHashHistory(), 
+  history: createWebHashHistory(),
   routes,
-})
+});
 
-export default router
+export default router;

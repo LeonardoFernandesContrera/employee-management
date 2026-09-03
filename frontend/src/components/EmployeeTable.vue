@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import type { Employee } from "../types/employee"
+import type { Employee } from "../types/employee";
 
 const props = defineProps<{
-  employees: Employee[]
-}>()
+  employees: Employee[];
+}>();
 
 defineEmits<{
-  (e: "edit", emp: Employee): void
-  (e: "delete", id: string): void
-}>()
+  (e: "edit", emp: Employee): void;
+  (e: "delete", id: string): void;
+}>();
 </script>
 
 <template>
@@ -39,8 +39,15 @@ defineEmits<{
         <td class="p-3">{{ emp.role }}</td>
         <td class="p-3">{{ emp.status }}</td>
         <td class="p-3 flex gap-2">
-          <button @click="$emit('edit', emp)" class="bg-yellow-500 text-white px-2 py-1 rounded">Edit</button>
-          <button @click="$emit('delete', emp.uuid)" class="bg-red-600 text-white px-2 py-1 rounded">Delete</button>
+          <button @click="$emit('edit', emp)" class="bg-yellow-500 text-white px-2 py-1 rounded">
+            Edit
+          </button>
+          <button
+            @click="$emit('delete', emp.uuid)"
+            class="bg-red-600 text-white px-2 py-1 rounded"
+          >
+            Delete
+          </button>
         </td>
       </tr>
     </tbody>

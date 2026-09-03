@@ -122,7 +122,11 @@ try {
   projectOwned = true;
   runCommand(dockerExecutable, [...composeArguments, "up", "-d", "--wait"]);
   created = snapshotResources();
-  if (created.containers.length !== 1 || created.networks.length !== 1 || created.volumes.length !== 0) {
+  if (
+    created.containers.length !== 1 ||
+    created.networks.length !== 1 ||
+    created.volumes.length !== 0
+  ) {
     throw new Error(`Unexpected isolated Compose resources: ${JSON.stringify(created)}`);
   }
 
@@ -170,14 +174,7 @@ try {
   }
 
   runNpx(
-    [
-      "jest",
-      "--selectProjects",
-      mode,
-      "--runInBand",
-      "--passWithNoTests",
-      ...forwardedArguments,
-    ],
+    ["jest", "--selectProjects", mode, "--runInBand", "--passWithNoTests", ...forwardedArguments],
     { env: jestEnvironment },
   );
 } catch (error) {
@@ -185,12 +182,7 @@ try {
 } finally {
   if (projectOwned) {
     try {
-      runCommand(dockerExecutable, [
-        ...composeArguments,
-        "down",
-        "--volumes",
-        "--remove-orphans",
-      ]);
+      runCommand(dockerExecutable, [...composeArguments, "down", "--volumes", "--remove-orphans"]);
     } catch (error) {
       cleanupError = error;
     }

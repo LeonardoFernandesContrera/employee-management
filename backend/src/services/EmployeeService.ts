@@ -4,15 +4,13 @@ import {
   CreateEmployeeDTO,
   UpdateEmployeeDTO,
   EmployeeQueryDTO,
-  ImportEmployeeRowDTO
+  ImportEmployeeRowDTO,
 } from "../dtos/EmployeeDTO";
 
 export class EmployeeService {
-
   private repository = new EmployeeRepository();
 
   async create(data: CreateEmployeeDTO) {
-
     if (!data.name) {
       throw new Error("Name is required");
     }
@@ -33,12 +31,11 @@ export class EmployeeService {
 
     return this.repository.create({
       ...data,
-      contract_date: new Date(data.contract_date)
+      contract_date: new Date(data.contract_date),
     });
   }
 
   async findById(uuid: string) {
-
     const employee = await this.repository.findById(uuid);
 
     if (!employee) {
@@ -49,7 +46,6 @@ export class EmployeeService {
   }
 
   async findAll(query: EmployeeQueryDTO) {
-
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
 
@@ -63,7 +59,7 @@ export class EmployeeService {
 
     if (query.name) {
       where.name = {
-        contains: query.name
+        contains: query.name,
       };
     }
 
@@ -75,15 +71,13 @@ export class EmployeeService {
       where.status = query.status;
     }
 
-    const orderBy = query.sort
-      ? { [query.sort]: "asc" }
-      : undefined;
+    const orderBy = query.sort ? { [query.sort]: "asc" } : undefined;
 
     const result = await this.repository.findAll({
       skip,
       take: limit,
       where,
-      orderBy
+      orderBy,
     });
 
     return {
@@ -91,35 +85,31 @@ export class EmployeeService {
       meta: {
         total: result.total,
         page,
-        totalPages: Math.ceil(result.total / limit)
-      }
+        totalPages: Math.ceil(result.total / limit),
+      },
     };
   }
 
   async update(uuid: string, data: UpdateEmployeeDTO) {
-
     await this.findById(uuid);
 
     return this.repository.update(uuid, data);
   }
 
   async delete(uuid: string) {
-
     await this.findById(uuid);
 
     return this.repository.delete(uuid);
   }
 
   async importEmployees(file: Express.Multer.File) {
-
     if (!file) {
-        throw new Error("File is required");
+      throw new Error("File is required");
     }
 
     const isXlsx =
-      file.mimetype ===
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" 
-        && file.originalname.endsWith(".xlsx");
+      file.mimetype === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" &&
+      file.originalname.endsWith(".xlsx");
 
     const validMimeTypes = ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"];
 
@@ -130,7 +120,7 @@ export class EmployeeService {
     }
 
     const workbook = XLSX.read(file.buffer, {
-      type: "buffer"
+      type: "buffer",
     });
 
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -142,49 +132,45 @@ export class EmployeeService {
     let rejected = 0;
 
     for (const row of rows) {
-
-        if (
+      if (
         !row.name ||
         !row.address ||
         !row.salary ||
         !row.contract_date ||
         !row.role ||
         !row.status
-        ) {
+      ) {
         rejected++;
         continue;
-        }
+      }
 
-        try {
-
+      try {
         await this.repository.create({
-            name: row.name,
-            address: row.address,
-            neighborhood: row.neighborhood,
-            zipcode: row.zipcode,
-            phone: row.phone,
-            salary: Number(row.salary),
-            contract_date: new Date(row.contract_date),
-            role: row.role,
-            status: row.status
+          name: row.name,
+          address: row.address,
+          neighborhood: row.neighborhood,
+          zipcode: row.zipcode,
+          phone: row.phone,
+          salary: Number(row.salary),
+          contract_date: new Date(row.contract_date),
+          role: row.role,
+          status: row.status,
         });
 
         inserted++;
-
-        } catch {
+      } catch {
         rejected++;
-        }
+      }
     }
 
     return {
-        total,
-        inseridos: inserted,
-        rejeitados: rejected
+      total,
+      inseridos: inserted,
+      rejeitados: rejected,
     };
   }
 
   async exportEmployees(query: EmployeeQueryDTO) {
-
     const where: {
       name?: { contains: string };
       role?: string;
@@ -204,7 +190,7 @@ export class EmployeeService {
     }
 
     const employees = await this.repository.findAll({
-      where
+      where,
     });
 
     const data = employees.data.map((emp) => ({
@@ -224,13 +210,9 @@ export class EmployeeService {
       role: emp.role,
       status: emp.status,
 
-      created_at: emp.created_at
-        ? new Date(emp.created_at).toISOString()
-        : null,
+      created_at: emp.created_at ? new Date(emp.created_at).toISOString() : null,
 
-      updated_at: emp.updated_at
-        ? new Date(emp.updated_at).toISOString()
-        : null
+      updated_at: emp.updated_at ? new Date(emp.updated_at).toISOString() : null,
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(data);
@@ -241,7 +223,7 @@ export class EmployeeService {
 
     return XLSX.write(workbook, {
       type: "buffer",
-      bookType: "xlsx"
+      bookType: "xlsx",
     });
   }
 }
