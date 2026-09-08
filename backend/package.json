@@ -10,6 +10,7 @@
     "prisma:generate": "prisma generate",
     "type-check": "tsc --noEmit",
     "lint": "eslint \"src/**/*.ts\" \"scripts/**/*.mjs\"",
+    "format:check": "prettier --check . --config ../prettier.config.cjs --ignore-path ../.prettierignore",
     "test:discovery": "node scripts/assert-jest-discovery.mjs",
     "test:unit": "jest --selectProjects unit --runInBand",
     "test:integration": "node scripts/run-isolated-tests.mjs integration",

@@ -1,0 +1,12 @@
+docs/
+README.md
+docker-compose.yml
+**/node_modules/
+**/dist/
+**/coverage/
+**/.env
+**/.env.local
+**/.env.*.local
+backend/prisma/migrations/
+backend/prisma/seed.ts
+backend/prisma/seed.js

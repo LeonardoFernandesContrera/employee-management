@@ -1,3 +1,14 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+interface PackageManifest {
+  scripts: Record<string, string>;
+}
+
+function readPackage(relativePath: string): PackageManifest {
+  return JSON.parse(readFileSync(resolve(__dirname, relativePath), "utf8")) as PackageManifest;
+}
+
 test("assigns every source test to exactly one Jest project", () => {
   const config = jest.requireActual("../../../jest.config.js");
   const byName = Object.fromEntries(
@@ -14,4 +25,17 @@ test("assigns every source test to exactly one Jest project", () => {
   for (const project of Object.values(byName) as Array<{ modulePathIgnorePatterns: string[] }>) {
     expect(project.modulePathIgnorePatterns).toContain("<rootDir>/dist/");
   }
+});
+
+test("defines the deterministic format check for both packages", () => {
+  const backendPackage = readPackage("../../../package.json");
+  const frontendPackage = readPackage("../../../../frontend/package.json");
+
+  expect(backendPackage.scripts["format:check"]).toBe(
+    "prettier --check . --config ../prettier.config.cjs --ignore-path ../.prettierignore",
+  );
+
+  expect(frontendPackage.scripts["format:check"]).toBe(
+    "prettier --check . --config ../prettier.config.cjs --ignore-path ../.prettierignore",
+  );
 });
