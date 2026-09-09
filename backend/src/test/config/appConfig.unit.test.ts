@@ -108,6 +108,7 @@ describe("parseEnvironment", () => {
   test.each([
     ["http://localhost:5173", "http://localhost:5173"],
     ["https://employees.example.com/", "https://employees.example.com"],
+    ["https://employees.example.com:443/", "https://employees.example.com"],
   ])("accepts and normalizes HTTP(S) origin %s", (corsOrigin, expected) => {
     expect(parseEnvironment({ ...validEnvironment(), CORS_ORIGIN: corsOrigin }).corsOrigin).toBe(
       expected,
@@ -119,6 +120,9 @@ describe("parseEnvironment", () => {
     "https://*.example.com",
     "ftp://employees.example.com",
     "https://employees.example.com/app",
+    "https://employees.example.com/.",
+    "https://employees.example.com/%2e",
+    "https://employees.example.com/app/..",
     "https://employees.example.com?tenant=one",
     "https://employees.example.com?",
     "https://employees.example.com#fragment",

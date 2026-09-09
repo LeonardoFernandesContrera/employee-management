@@ -30,7 +30,14 @@ const portSchema = requiredText
   .refine((value) => value <= 65535);
 
 const isCorsOrigin = (value: string): boolean => {
-  if (value.includes("*") || value.includes("?") || value.includes("#")) return false;
+  if (value.includes("*") || value.includes("?") || value.includes("#") || value.includes("\\"))
+    return false;
+
+  const authorityStart = value.indexOf("://") + 3;
+  if (authorityStart < 3) return false;
+  const suffixStart = value.indexOf("/", authorityStart);
+  const rawSuffix = suffixStart === -1 ? "" : value.slice(suffixStart);
+  if (rawSuffix !== "" && rawSuffix !== "/") return false;
 
   try {
     const url = new URL(value);
