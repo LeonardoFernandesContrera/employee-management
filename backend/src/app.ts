@@ -1,22 +1,29 @@
-import express from "express";
+import express, { type Express } from "express";
 import cors from "cors";
-import employeeRoutes from "./routes/EmployeeRoute";
+
+import { createProductionDependencies, type AppDependencies } from "./appDependencies";
+import type { AppConfig } from "./config/appConfig";
+import { ApplicationError } from "./errors/ApplicationError";
 import { errorMiddleware } from "./middlewares/ErrorMiddleware";
+import { createHealthRouter } from "./routes/HealthRoute";
 
-const app = express();
+export function createApp(
+  config: AppConfig,
+  dependencies: AppDependencies = createProductionDependencies(config),
+): Express {
+  const app = express();
 
-app.use(cors());
-app.use(express.json());
+  app.use(cors({ origin: config.corsOrigin }));
+  app.use(express.json());
 
-app.get("/", (req, res) => {
-  res.send("Employee Management API is running");
-});
+  app.use("/health", createHealthRouter(dependencies.readinessCheck));
+  app.use("/employees", dependencies.employeeRouter);
 
-app.listen(3000, () => {
-  console.log("Employee Management API is running on port 3000");
-});
-app.use("/employees", employeeRoutes);
+  app.use((_request, _response, next) => {
+    next(new ApplicationError("ROUTE_NOT_FOUND", "Route not found."));
+  });
 
-app.use(errorMiddleware);
+  app.use(errorMiddleware);
 
-export default app;
+  return app;
+}
