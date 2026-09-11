@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
-import type { Employee, Filters } from "../types/employee";
-import { useEmployee } from "../composables/useEmployee";
+import { onMounted, ref } from "vue";
+
+import EmployeeEditModal from "../components/EmployeeEditModal.vue";
 import EmployeeFilter from "../components/EmployeeFilter.vue";
 import EmployeeTable from "../components/EmployeeTable.vue";
-import EmployeeEditModal from "../components/EmployeeEditModal.vue";
+import { useEmployee } from "../composables/useEmployee";
+import type { Employee, EmployeeFilters, UpdateEmployeeInput } from "../types/employee";
 
-const filters = ref<Filters>({ name: "", role: "", status: "", sort: "" });
+const filters = ref<EmployeeFilters>({
+  search: "",
+  status: "",
+  sortBy: "fullName",
+  sortOrder: "asc",
+});
 const editing = ref<Employee | null>(null);
 const isEditModalOpen = ref(false);
 
@@ -15,24 +21,31 @@ const {
   loading,
   error,
   page,
-  totalPages,
+  meta,
   importSummary,
   fetchEmployees,
+  applyFilters,
   removeEmployee,
   saveEmployee,
   handleImport,
   handleExport,
+  previousPage,
+  nextPage,
 } = useEmployee();
 
 onMounted(() => fetchEmployees(filters.value));
 
-const startEdit = (emp: Employee) => {
-  editing.value = { ...emp };
+const startEdit = (employee: Employee) => {
+  editing.value = { ...employee };
   isEditModalOpen.value = true;
 };
 
-const saveEdit = (emp: Employee) => {
-  saveEmployee(emp, filters.value);
+const saveEdit = async (input: UpdateEmployeeInput): Promise<void> => {
+  if (!editing.value) {
+    return;
+  }
+
+  await saveEmployee(editing.value.id, input, filters.value);
   isEditModalOpen.value = false;
   editing.value = null;
 };
@@ -46,10 +59,12 @@ const confirmDelete = (id: string) => removeEmployee(id, filters.value);
 
 const fileInput = ref<HTMLInputElement | null>(null);
 const importFile = () => fileInput.value?.click();
-const onFileChange = (e: Event) => {
-  const target = e.target as HTMLInputElement;
+const onFileChange = (event: Event) => {
+  const target = event.target as HTMLInputElement;
   const file = target.files?.[0];
-  if (file) handleImport(file, filters.value);
+  if (file) {
+    void handleImport(file, filters.value);
+  }
 };
 </script>
 
@@ -57,10 +72,10 @@ const onFileChange = (e: Event) => {
   <div class="p-8 max-w-7xl mx-auto">
     <h1 class="text-3xl font-bold mb-6">Employees</h1>
 
-    <EmployeeFilter :filters="filters" @filter="() => fetchEmployees(filters)" />
+    <EmployeeFilter :filters="filters" @filter="applyFilters(filters)" />
 
     <div class="flex gap-4 mb-6">
-      <input ref="fileInput" type="file" class="hidden" @change="onFileChange" />
+      <input ref="fileInput" class="hidden" type="file" @change="onFileChange" />
       <button
         class="bg-gray-800 text-white px-4 py-2 rounded hover:bg-gray-900"
         @click="importFile"
@@ -77,8 +92,8 @@ const onFileChange = (e: Event) => {
 
     <div v-if="importSummary" class="mb-4 p-3 border rounded bg-gray-100 text-gray-800">
       <p><strong>Total:</strong> {{ importSummary.total }}</p>
-      <p><strong>Inserted:</strong> {{ importSummary.inseridos }}</p>
-      <p><strong>Rejected:</strong> {{ importSummary.rejeitados }}</p>
+      <p><strong>Inserted:</strong> {{ importSummary.inserted }}</p>
+      <p><strong>Rejected:</strong> {{ importSummary.rejected }}</p>
     </div>
 
     <div v-if="loading" class="text-gray-500 mb-4">Loading...</div>
@@ -88,23 +103,17 @@ const onFileChange = (e: Event) => {
 
     <div class="flex justify-center gap-4 mt-6">
       <button
-        :disabled="page === 1"
+        :disabled="page <= 1 || meta.totalPages === 0"
         class="px-3 py-1 border rounded"
-        @click="
-          page--;
-          fetchEmployees(filters);
-        "
+        @click="previousPage(filters)"
       >
         Previous
       </button>
-      <span class="font-semibold">{{ page }} / {{ totalPages }}</span>
+      <span class="font-semibold">{{ page }} / {{ meta.totalPages || 1 }}</span>
       <button
-        :disabled="page === totalPages"
+        :disabled="meta.totalPages === 0 || page >= meta.totalPages"
         class="px-3 py-1 border rounded"
-        @click="
-          page++;
-          fetchEmployees(filters);
-        "
+        @click="nextPage(filters)"
       >
         Next
       </button>

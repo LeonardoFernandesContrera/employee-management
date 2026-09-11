@@ -1,33 +1,62 @@
 import { ref } from "vue";
-import type { Employee, Filters, PaginatedResponse, ImportSummary } from "../types/employee";
+
 import {
-  getEmployees,
   deleteEmployee,
-  updateEmployee,
-  importEmployees,
   exportEmployees,
+  getEmployees,
+  importEmployees,
+  updateEmployee,
 } from "../api/employee";
+import type {
+  Employee,
+  EmployeeFilters,
+  EmployeeListMeta,
+  EmployeeListQuery,
+  ImportSummary,
+  UpdateEmployeeInput,
+} from "../types/employee";
+
+const initialMeta = (): EmployeeListMeta => ({
+  page: 1,
+  pageSize: 10,
+  totalItems: 0,
+  totalPages: 0,
+  sortBy: "fullName",
+  sortOrder: "asc",
+});
 
 export function useEmployee() {
   const employees = ref<Employee[]>([]);
   const loading = ref(false);
   const error = ref("");
   const page = ref(1);
-  const totalPages = ref(1);
+  const pageSize = ref(10);
+  const meta = ref<EmployeeListMeta>(initialMeta());
   const importSummary = ref<ImportSummary | null>(null);
 
-  const fetchEmployees = async (filters: Filters) => {
+  const toQuery = (filters: EmployeeFilters): EmployeeListQuery => {
+    const search = filters.search.trim();
+
+    return {
+      page: page.value,
+      pageSize: pageSize.value,
+      sortBy: filters.sortBy,
+      sortOrder: filters.sortOrder,
+      ...(search ? { search } : {}),
+      ...(filters.status ? { status: filters.status } : {}),
+    };
+  };
+
+  const fetchEmployees = async (filters: EmployeeFilters): Promise<void> => {
     loading.value = true;
     error.value = "";
+
     try {
-      const params: Partial<Filters> & { page: number } = { page: page.value };
-      Object.entries(filters).forEach(([key, value]) => {
-        if (value) (params as any)[key] = value;
-      });
-      const res = await getEmployees(params);
-      const data = res.data as PaginatedResponse<Employee>;
-      employees.value = data.data;
-      totalPages.value = data.meta.totalPages;
+      const response = await getEmployees(toQuery(filters));
+      employees.value = response.data;
+      meta.value = response.meta;
+      page.value = response.meta.page;
+      pageSize.value = response.meta.pageSize;
     } catch {
       error.value = "Error loading employees";
     } finally {
@@ -35,30 +64,61 @@ export function useEmployee() {
     }
   };
 
-  const removeEmployee = async (id: string, filters: Filters) => {
-    if (!confirm("Are you sure you want to delete this employee?")) return;
+  const applyFilters = async (filters: EmployeeFilters): Promise<void> => {
+    page.value = 1;
+    await fetchEmployees(filters);
+  };
+
+  const removeEmployee = async (id: string, filters: EmployeeFilters): Promise<void> => {
+    if (!window.confirm("Are you sure you want to delete this employee?")) {
+      return;
+    }
+
     await deleteEmployee(id);
-    fetchEmployees(filters);
+    await fetchEmployees(filters);
   };
 
-  const saveEmployee = async (employee: Employee, filters: Filters) => {
-    await updateEmployee(employee.uuid, employee);
-    fetchEmployees(filters);
+  const saveEmployee = async (
+    id: string,
+    input: UpdateEmployeeInput,
+    filters: EmployeeFilters,
+  ): Promise<void> => {
+    await updateEmployee(id, input);
+    await fetchEmployees(filters);
   };
 
-  const handleImport = async (file: File, filters: Filters) => {
-    const res = await importEmployees(file);
-    importSummary.value = res.data as ImportSummary;
-    fetchEmployees(filters);
+  const handleImport = async (file: File, filters: EmployeeFilters): Promise<void> => {
+    importSummary.value = await importEmployees(file);
+    await fetchEmployees(filters);
   };
 
-  const handleExport = async () => {
-    const res = await exportEmployees();
-    const url = window.URL.createObjectURL(res.data);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "employees.xlsx";
-    a.click();
+  const handleExport = async (): Promise<void> => {
+    const blob = await exportEmployees();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "employees.xlsx";
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const previousPage = async (filters: EmployeeFilters): Promise<void> => {
+    if (page.value <= 1 || meta.value.totalPages === 0) {
+      return;
+    }
+
+    page.value -= 1;
+    await fetchEmployees(filters);
+  };
+
+  const nextPage = async (filters: EmployeeFilters): Promise<void> => {
+    if (meta.value.totalPages === 0 || page.value >= meta.value.totalPages) {
+      return;
+    }
+
+    page.value += 1;
+    await fetchEmployees(filters);
   };
 
   return {
@@ -66,12 +126,16 @@ export function useEmployee() {
     loading,
     error,
     page,
-    totalPages,
+    pageSize,
+    meta,
     importSummary,
     fetchEmployees,
+    applyFilters,
     removeEmployee,
     saveEmployee,
     handleImport,
     handleExport,
+    previousPage,
+    nextPage,
   };
 }

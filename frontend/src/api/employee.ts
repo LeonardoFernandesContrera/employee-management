@@ -1,27 +1,54 @@
 import axios from "axios";
 
-const api = axios.create({
-  baseURL: "http://localhost:3000/employees",
-});
+import type {
+  CreateEmployeeInput,
+  Employee,
+  EmployeeListQuery,
+  EmployeeListResponse,
+  ImportSummary,
+  UpdateEmployeeInput,
+} from "../types/employee";
 
-export const getEmployees = (params: any) => {
-  console.log(params);
-  let teste = api.get("/", { params });
-  console.log(teste);
-  return teste;
-};
+interface DataEnvelope<T> {
+  data: T;
+}
 
-export const createEmployee = (data: any) => api.post("/", data);
+const publicApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/+$/, "");
 
-export const updateEmployee = (id: string, data: any) => api.put(`/${id}`, data);
+if (!publicApiBaseUrl) {
+  throw new Error("VITE_API_BASE_URL is required at build time");
+}
 
-export const deleteEmployee = (id: string) => api.delete(`/${id}`);
+const api = axios.create({ baseURL: `${publicApiBaseUrl}/employees` });
 
-export const exportEmployees = () => api.get("/export", { responseType: "blob" });
+export async function getEmployees(query: EmployeeListQuery): Promise<EmployeeListResponse> {
+  const response = await api.get<EmployeeListResponse>("/", { params: query });
+  return response.data;
+}
 
-export const importEmployees = (file: File) => {
+export async function createEmployee(input: CreateEmployeeInput): Promise<Employee> {
+  const response = await api.post<DataEnvelope<Employee>>("/", input);
+  return response.data.data;
+}
+
+export async function updateEmployee(id: string, input: UpdateEmployeeInput): Promise<Employee> {
+  const response = await api.patch<DataEnvelope<Employee>>(`/${id}`, input);
+  return response.data.data;
+}
+
+export async function deleteEmployee(id: string): Promise<void> {
+  await api.delete(`/${id}`);
+}
+
+export async function importEmployees(file: File): Promise<ImportSummary> {
   const form = new FormData();
   form.append("file", file);
 
-  return api.post("/import", form);
-};
+  const response = await api.post<DataEnvelope<ImportSummary>>("/import", form);
+  return response.data.data;
+}
+
+export async function exportEmployees(): Promise<Blob> {
+  const response = await api.get<Blob>("/export", { responseType: "blob" });
+  return response.data;
+}
