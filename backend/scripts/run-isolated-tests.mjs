@@ -7,6 +7,7 @@ const backendRoot = fileURLToPath(new URL("../", import.meta.url));
 const composeFile = resolve(backendRoot, "test", "docker-compose.postgres.yml");
 const dockerExecutable = process.platform === "win32" ? "docker.exe" : "docker";
 const projectPattern = /^employee-phase1-test-[0-9]+-[a-f0-9]{12}$/u;
+const disposableDatabasePattern = /^employee_phase1_test_[a-z0-9_]+$/u;
 const integrationDatabase = "employee_phase1_test_suite";
 const authorityVariables = [
   "TEST_DATABASE_ADMIN_URL",
@@ -100,6 +101,34 @@ function resourceCount(snapshot) {
   return snapshot.containers.length + snapshot.networks.length + snapshot.volumes.length;
 }
 
+function snapshotDisposableDatabases() {
+  const output = runCommand(
+    dockerExecutable,
+    [
+      ...composeArguments,
+      "exec",
+      "-T",
+      "postgres",
+      "psql",
+      "-At",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-U",
+      "postgres",
+      "-d",
+      "postgres",
+      "-c",
+      "SELECT datname FROM pg_database WHERE left(datname, 21) = 'employee_phase1_test_' ORDER BY datname COLLATE \"C\" ASC;",
+    ],
+    { echo: false },
+  );
+  const databases = output ? output.split(/\r?\n/u).filter(Boolean).sort() : [];
+  if (databases.some((database) => !disposableDatabasePattern.test(database))) {
+    throw new Error(`Unsafe disposable database reported: ${JSON.stringify(databases)}`);
+  }
+  return databases;
+}
+
 function childEnvironment() {
   const environment = { ...process.env, NODE_ENV: "test" };
   for (const variable of authorityVariables) delete environment[variable];
@@ -112,6 +141,8 @@ let final = { containers: [], networks: [], volumes: [] };
 let primaryError;
 let cleanupError;
 let databaseName = null;
+let migrationAuthorityReady = false;
+const databases = { before: [], final: [] };
 
 try {
   const before = snapshotResources();
@@ -171,6 +202,11 @@ try {
     jestEnvironment.TEST_DATABASE_ADMIN_URL = adminUrl;
     jestEnvironment.TEST_COMPOSE_PROJECT = project;
     jestEnvironment.ALLOW_DATABASE_MUTATION = "true";
+    databases.before = snapshotDisposableDatabases();
+    if (databases.before.length !== 0) {
+      throw new Error(`Disposable databases already exist: ${JSON.stringify(databases.before)}`);
+    }
+    migrationAuthorityReady = true;
   }
 
   runNpx(
@@ -180,6 +216,17 @@ try {
 } catch (error) {
   primaryError = error;
 } finally {
+  if (migrationAuthorityReady) {
+    try {
+      databases.final = snapshotDisposableDatabases();
+      if (databases.final.length !== 0) {
+        cleanupError = new Error(`Temporary databases remain: ${JSON.stringify(databases.final)}`);
+      }
+    } catch (error) {
+      cleanupError = error;
+    }
+  }
+
   if (projectOwned) {
     try {
       runCommand(dockerExecutable, [...composeArguments, "down", "--volumes", "--remove-orphans"]);
@@ -203,6 +250,7 @@ try {
         mode,
         project,
         databaseName,
+        databases,
         created,
         final,
         cleanupCommand: [
