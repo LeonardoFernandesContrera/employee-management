@@ -1,10 +1,9 @@
 import multer from "multer";
 
-const storage = multer.memoryStorage();
+export const MAX_XLSX_FILE_SIZE = 5 * 1024 * 1024;
+export const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 export const upload = multer({
-  storage,
-  limits: {
-    fileSize: 5 * 1024 * 1024,
-  },
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_XLSX_FILE_SIZE },
 });

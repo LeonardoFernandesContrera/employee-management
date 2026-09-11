@@ -19,6 +19,11 @@ const statusByCode: Readonly<Record<ErrorCode, number>> = {
 const isMalformedJson = (error: unknown): error is SyntaxError & { type: string } =>
   error instanceof SyntaxError && "type" in error && error.type === "entity.parse.failed";
 
+const prismaErrorCode = (error: unknown): string | undefined =>
+  typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+    ? error.code
+    : undefined;
+
 const sendError = (
   response: Response,
   status: number,
@@ -60,6 +65,14 @@ export function errorMiddleware(
 
   if (isMalformedJson(error)) {
     return sendError(response, 400, "MALFORMED_JSON", "Request body is not valid JSON.");
+  }
+
+  const persistenceCode = prismaErrorCode(error);
+  if (persistenceCode === "P2002") {
+    return sendError(response, 409, "EMAIL_CONFLICT", "Email is already in use.");
+  }
+  if (persistenceCode === "P2025") {
+    return sendError(response, 404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
   }
 
   if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
