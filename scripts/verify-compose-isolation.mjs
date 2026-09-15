@@ -524,7 +524,7 @@ async function runNormalVerification() {
   const cleanupCommands = [];
   let invalidStartupStoppedBeforeApi = false;
   let primaryError;
-  let cleanupError;
+  const cleanupErrors = [];
 
   try {
     process.stdout.write(`[task9-resource] direct image ${direct.tag}\n`);
@@ -543,25 +543,70 @@ async function runNormalVerification() {
   } catch (error) {
     primaryError = error;
   } finally {
+    for (const project of [...projects].reverse()) {
+      try {
+        cleanupProject(project, cleanupCommands);
+      } catch (error) {
+        cleanupErrors.push(
+          new Error(`Cleanup failed for Compose project ${project.project}.`, { cause: error }),
+        );
+      }
+
+      try {
+        project.final = snapshotProject(project);
+      } catch (error) {
+        project.final = null;
+        cleanupErrors.push(
+          new Error(`Final-state inspection failed for Compose project ${project.project}.`, {
+            cause: error,
+          }),
+        );
+      }
+    }
+
     try {
-      for (const project of [...projects].reverse()) cleanupProject(project, cleanupCommands);
       cleanupDirect(direct, cleanupCommands);
+    } catch (error) {
+      cleanupErrors.push(
+        new Error(`Cleanup failed for direct resource ${direct.tag}.`, { cause: error }),
+      );
+    }
+
+    try {
       assertPreExistingImagesRemain(preExistingImageIds);
     } catch (error) {
-      cleanupError = error;
+      cleanupErrors.push(
+        new Error("Post-cleanup image-preservation check failed.", { cause: error }),
+      );
     }
   }
 
-  const directTagAbsent = !imageExists(direct.tag);
-  const directImageIdAbsent = direct.imageId ? !imageExists(direct.imageId) : false;
-  if (!primaryError && !cleanupError) {
-    if (!directTagAbsent) cleanupError = new Error(`Direct image tag remains: ${direct.tag}`);
-    if (direct.imageIdExistedBefore && directImageIdAbsent) {
-      cleanupError = new Error(`Pre-existing direct image ID was removed: ${direct.imageId}`);
-    }
-    if (!direct.imageIdExistedBefore && !directImageIdAbsent) {
-      cleanupError = new Error(`New direct image ID remains: ${direct.imageId}`);
-    }
+  let directContainerAbsent = null;
+  let directTagAbsent = null;
+  let directImageIdAbsent = null;
+  try {
+    directContainerAbsent = !containerExists(direct.container);
+    directTagAbsent = !imageExists(direct.tag);
+    directImageIdAbsent = direct.imageId ? !imageExists(direct.imageId) : null;
+  } catch (error) {
+    cleanupErrors.push(
+      new Error(`Final-state inspection failed for direct resource ${direct.tag}.`, {
+        cause: error,
+      }),
+    );
+  }
+
+  if (directContainerAbsent === false) {
+    cleanupErrors.push(new Error(`Direct verification container remains: ${direct.container}`));
+  }
+  if (directTagAbsent === false) {
+    cleanupErrors.push(new Error(`Direct image tag remains: ${direct.tag}`));
+  }
+  if (direct.imageIdExistedBefore && directImageIdAbsent === true) {
+    cleanupErrors.push(new Error(`Pre-existing direct image ID was removed: ${direct.imageId}`));
+  }
+  if (direct.imageId && !direct.imageIdExistedBefore && directImageIdAbsent === false) {
+    cleanupErrors.push(new Error(`New direct image ID remains: ${direct.imageId}`));
   }
 
   const report = {
@@ -570,6 +615,8 @@ async function runNormalVerification() {
       tagExistedBefore: false,
       imageId: direct.imageId,
       imageIdExistedBefore: direct.imageIdExistedBefore,
+      container: direct.container,
+      containerAbsentAfter: directContainerAbsent,
       removedExactTagAfter: directTagAbsent,
       imageIdAbsentAfter: directImageIdAbsent,
     },
@@ -583,11 +630,17 @@ async function runNormalVerification() {
     })),
     invalidStartupStoppedBeforeApi,
     cleanupCommands,
+    cleanupErrors: cleanupErrors.map((error) => ({
+      message: error.message,
+      cause: error.cause instanceof Error ? error.cause.message : String(error.cause ?? ""),
+    })),
   };
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 
-  if (cleanupError) throw cleanupError;
   if (primaryError) throw primaryError;
+  if (cleanupErrors.length !== 0) {
+    throw new AggregateError(cleanupErrors, "Task 9 cleanup failed.");
+  }
 }
 
 async function waitForSmokeRelease() {
