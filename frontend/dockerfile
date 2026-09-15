@@ -1,16 +1,27 @@
-FROM node:20
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY package*.json ./
-
-RUN npm install && npm install -g serve
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
+ARG VITE_API_BASE_URL
+RUN test -n "$VITE_API_BASE_URL" && VITE_API_BASE_URL="$VITE_API_BASE_URL" npm run build
 
-RUN npm run build
+FROM node:20-alpine AS runtime
 
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev \
+  && test -x node_modules/.bin/serve
+
+COPY --from=builder /app/dist ./dist
+RUN chown -R node:node /app
+
+USER node
 EXPOSE 5173
 
-ENV HOST=0.0.0.0
-CMD ["serve", "-s", "dist", "-l", "5173"]
+CMD ["node_modules/.bin/serve", "-s", "dist", "-l", "5173"]

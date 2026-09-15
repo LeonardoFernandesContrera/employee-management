@@ -1,35 +1,66 @@
 services:
-
   db:
     image: postgres:15
-    container_name: employees_db
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: employees
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-employees}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
 
   api:
-    build: ./backend
-    container_name: employees_api
+    build:
+      context: ./backend
+      dockerfile: dockerfile
     ports:
-      - "3000:3000"
+      - "${API_PORT:-3000}:3000"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/employees
-    command: sh -c "npx prisma migrate deploy && npx prisma db seed && ts-node src/app.ts"
-    
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-employees}?schema=public
+      PORT: "3000"
+      CORS_ORIGIN: ${CORS_ORIGIN:?set the public frontend origin}
+      NODE_ENV: production
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health/ready').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
   frontend:
-    build: ./frontend
-    container_name: employees_frontend
+    build:
+      context: ./frontend
+      dockerfile: dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:?set a public API base URL}
     ports:
-      - "5173:5173"
+      - "${FRONTEND_PORT:-5173}:5173"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5173').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
 
 volumes:
   postgres_data:
